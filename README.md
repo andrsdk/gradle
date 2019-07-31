@@ -32,3 +32,9 @@ ext.sdk_dependencies = []
 ```
 secret_home=D\:\\01_CODE\\secret
 ```
+
+4. 运行
+
+```
+执行模块下的pack命令
+```
