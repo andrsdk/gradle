@@ -64,7 +64,7 @@ task packUnzip(group: 'pack') {
 // 压缩结果
 task packZip(type: Zip, group: 'pack') {
     from "${buildDir}/secret/arrDir"
-    baseName "${sdk_name}_${sdk_version}"
+    baseName "${loader_sdk_name}_${loader_sdk_version}"
     destinationDir file("${rootProject.rootDir}/dist")
     extension 'aar'
 }
@@ -112,8 +112,8 @@ task packPom(group: 'pack') {
         pom {
             project {
                 groupId "com.dotc.sdk"
-                artifactId sdk_name
-                version sdk_version
+                artifactId loader_sdk_name
+                version loader_sdk_version
                 packaging 'aar'
             }
         }.withXml {
