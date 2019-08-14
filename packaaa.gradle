@@ -1,0 +1,175 @@
+// 删除中间文件目录
+task packClean(type: Delete, group: 'pack') {
+    delete "${buildDir}/secret"
+    delete "${rootProject.rootDir}/dist"
+}
+
+// 依赖assembleRelease 生成线上版本aar, 并解压到指定临时文件夹
+task packUnzip(group: 'pack') {
+    tasks.packUnzip.dependsOn("assembleRelease")
+    doLast {
+        android.libraryVariants.all { variant ->
+            if (variant.buildType.name == 'release') {
+                variant.outputs.all { output ->
+//                    println "xxx " + variant.packageLgetPackageLibraryibraryProvider.get().destinationDirectory.asFile.get()
+//                    println "xxx " + variant.packageLibrary.destinationDir
+//                    println "xxx " + output.outputFile.absolutePath
+//                    println "xxx " + outputFileName + " " + variant.buildType.name
+                    def aarFilePath = new File(variant.packageLibrary.destinationDir, outputFileName).absolutePath
+//                    def aarFilePath = new File(variant.packageLibraryProvider.get().destinationDirectory.asFile.get(), outputFileName).absolutePath
+                    println "[pack] aarFilePath ${aarFilePath}"
+
+                    println "[pack] unzip"
+                    copy {
+                        from zipTree(aarFilePath)
+                        into "${buildDir}/secret/arrDir"
+                    }
+
+                    println "[pack] jar -> dex"
+                    exec {
+                        commandLine execCommand("${dxDirPath}/dx", "--dex", "--output=${buildDir}/secret/src.dex", "${buildDir}/secret/arrDir/classes.jar")
+                    }
+
+                    println "[pack] dex -> smali"
+                    exec {
+                        commandLine execCommand('java', "-jar", "${secret_home}/baksmali-2.0.jar", "${buildDir}/secret/src.dex", "-o", "${buildDir}/secret/smali/src")
+                    }
+
+                    println "[pack] smali string obfuscate"
+                    exec {
+                        commandLine execCommand("python", "${secret_home}/modules/smali_string_obfuscator.py", "-i", "${buildDir}/secret/smali/src", "-o", "${buildDir}/secret/smali/dst", "-c", "*")
+                    }
+
+                    println "[pack] smali -> dex"
+                    exec {
+                        commandLine execCommand('java', "-jar", "${secret_home}/smali-2.0.jar", "${buildDir}/secret/smali/dst", "-o", "${buildDir}/secret/dst.dex")
+                    }
+
+                    println "[pack] dex -> jar"
+                    exec {
+                        commandLine execCommand("${secret_home}/dex2jar-2.0/${commandTransformation('d2j-dex2jar')}", "${buildDir}/secret/dst.dex", "-o", "${buildDir}/secret/arrDir/classes.jar", "--force")
+                    }
+                }
+            }
+        }
+    }
+}
+
+//task packTest(type: Exec, group: 'pack') {
+//    println "${secret_home}\\baksmali-2.0.jar"
+//    commandLine execCommand('java', "-jar", "${secret_home}/baksmali-2.0.jar", "${buildDir}/secret/src.dex", "-o", "${buildDir}/secret/smali/src")
+//}
+
+
+// 压缩结果
+task packZip(type: Zip, group: 'pack') {
+    from "${buildDir}/secret/arrDir"
+    baseName "${sdk_name}_${sdk_version}"
+    destinationDir file("${rootProject.rootDir}/dist")
+    extension 'aar'
+}
+
+import org.apache.tools.ant.taskdefs.condition.Os
+
+static Iterable<String> execCommand(String... commands) {
+    def newCommands = []
+    if (Os.isFamily(Os.FAMILY_WINDOWS)) {
+        newCommands = ['cmd', '/c']
+    }
+    newCommands.addAll(commands)
+    return newCommands
+}
+
+static String commandTransformation(String oldCommand) {
+    def newCommand
+    if (Os.isFamily(Os.FAMILY_WINDOWS)) {
+        newCommand = "${oldCommand}.bat"
+    } else {
+        newCommand = "${oldCommand}.sh"
+    }
+    return newCommand
+}
+
+// pom.xml create
+//*****************************************************************************************************
+//*****************************************************************************************************
+//*****************************************************************************************************
+//*****************************************************************************************************
+static def getDependencyNode(scope, groupId, artifactId, version) {
+    Node node = new Node(null, 'dependency')
+    node.appendNode('groupId', groupId)
+    node.appendNode('artifactId', artifactId)
+    node.appendNode('version', version)
+    node.appendNode('scope', scope)
+    return node
+}
+
+task packPom(group: 'pack') {
+    doLast {
+        println "[pack] -> pom.xml"
+        apply plugin: 'maven'
+        description "create Pom for libY SDK"
+        pom {
+            project {
+                groupId "com.dotc.sdk"
+                artifactId sdk_name
+                version sdk_version
+                packaging 'aar'
+            }
+        }.withXml {
+            def root = asNode()
+            def dependencies = root.appendNode('dependencies')
+            for (d in sdk_dependencies) {
+//            println(d.key + '__' + d.value)
+                def splits = d.value.split(':')
+//            println(splits)
+                dependencies.append(getDependencyNode('compile', splits[0], splits[1], splits[2]))
+            }
+        }.writeTo("${rootProject.rootDir}/dist/pom.xml")
+    }
+}
+
+task packCheckProperty(group: 'pack') {
+    doLast {
+        println "[pack] check properties secret_home sdk"
+        Properties prop = new Properties()
+        prop.load(rootProject.file('local.properties').newDataInputStream())
+        def sdk = prop.getProperty('sdk.dir')
+        def secret_home = prop.getProperty('secret_home')
+        def dxDirPath = null
+
+        def versions = ['29.0.0', '28.0.3', '28.0.2', '27.0.3', '27.0.2', '27.0.1', '26.0.2', '26.0.1']
+        def buildToolsDir = new File(sdk, 'build-tools').absolutePath
+        versions.find {
+            def dxDirFile = new File(buildToolsDir, it)
+            if (dxDirFile.exists()) {
+                dxDirPath = dxDirFile.absolutePath
+                return true
+            }
+        }
+
+        if (secret_home == null) {
+            throw new NullPointerException("secret_home is null, please set secret_home dir at local.propeties.")
+        }
+
+        if (dxDirPath == null) {
+            throw new NullPointerException("dxDirPath is null, please set sdk.dir at local.propeties.")
+        }
+
+        project.ext.secret_home = secret_home
+        project.ext.dxDirPath = dxDirPath
+//        println sdk
+//        println secret_home
+//        println dxDirPath
+    }
+}
+
+task pack(group: 'pack') {
+}
+
+// packCheckProperty -> packClean -> packUnzip -> packZip -> packPom -> pack
+pack.dependsOn("packPom")
+packPom.dependsOn("packZip")
+packZip.dependsOn("packUnzip")
+packUnzip.dependsOn("packClean")
+packUnzip.dependsOn("packCheckProperty")
