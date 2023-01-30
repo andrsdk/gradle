@@ -1,0 +1,133 @@
+// properties文件配置
+// 前缀 temp 临时变量
+// 前缀 build 编译期设置参数，存入ext变量
+// 前缀 bc buildConfigField
+// 前缀 rv resValue
+ext.initConfiguration = { projectTarget ->
+    println("===============> BUILD START <=============== $projectTarget")
+    def parseParam = { rawKey, text, localMap ->
+        if (text == null || text.isEmpty()) {
+            return ""
+        }
+        String openToken = "\${"
+        String closeToken = "}"
+        char[] src = text.toCharArray()
+        int offset = 0;
+        int start = text.indexOf(openToken, offset)
+        if (start == -1) {
+            return text
+        }
+        final StringBuilder builder = new StringBuilder();
+        while(start > -1) {
+            builder.append(src, offset, start - offset)
+            offset = start + openToken.length()
+            int end = text.indexOf(closeToken, offset)
+            if (end == -1) {
+                throw new IllegalAccessException("format error(NOT FOUND '}'), please watch key:" + rawKey)
+            }
+
+            String key = text.substring(offset, end)
+            String value = localMap.get(key)
+            builder.append(value)
+            offset = end + closeToken.length()
+            start = text.indexOf(openToken, offset)
+        }
+        if (offset < src.length) {
+            builder.append(src, offset, src.length - offset);
+        }
+
+        return builder.toString()
+    }
+    Properties properties = new Properties()
+    properties.load(new FileInputStream("${projectTarget.rootDir}/config/application.properties"))
+
+    def localMap = new HashMap()
+    properties.forEach() { key, value ->
+        localMap.put(key, value)
+    }
+
+    if (ext.has("BUILD_TARGET")) {
+        ext.BUILD_TARGET = ext.BUILD_TARGET.toLowerCase()
+    } else {
+        String buildTarget = localMap.get("BUILD_TARGET")
+        ext.BUILD_TARGET = buildTarget
+    }
+    try {
+        properties = new Properties()
+        properties.load(new FileInputStream("${projectTarget.rootDir}/config/${ext.BUILD_TARGET}.properties"))
+        properties.forEach() { key, value ->
+            localMap.put(key, value)
+        }
+    } catch (Throwable e) {
+    }
+
+    // 去除环境变量，检查配置
+    def paramMap = new HashMap()
+    localMap.forEach() { key, value ->
+        def start = key.indexOf(".", 0)
+        if (start < 0) {
+            if (paramMap.containsKey(key)) {
+                throw new IllegalArgumentException("参数重复:" + key)
+            }
+            paramMap.put(key, value)
+        } else {
+            def k = key.substring(start + 1)
+            if (paramMap.containsKey(k)) {
+                throw new IllegalArgumentException("参数重复:" + k)
+            }
+            paramMap.put(k, value)
+        }
+    }
+
+    // fill parameters
+    ext.bootBCMap = new HashMap()
+    ext.bootRVMap = new HashMap()
+    localMap.forEach() { key, value ->
+        def newValue = parseParam(key, value, paramMap)
+        if (key.startsWith("build.")) {
+            def k = key.substring(6)
+            ext.setProperty(k, newValue)
+            println("build:put::$k = [$newValue]")
+        } else if (key.startsWith("bc.")) {
+            def k = key.substring(3)
+            ext.bootBCMap.put(k, newValue)
+            ext.setProperty(k, newValue)
+            println("bc:put::$k = [$newValue]")
+        } else if (key.startsWith("rv.")) {
+            def k = key.substring(3)
+            ext.bootRVMap.put(k, newValue)
+            ext.setProperty(k, newValue)
+            println("rv:put::$k = [$newValue]")
+        }
+    }
+
+    // build put
+//    localMap.forEach() { key, value ->
+//        if (key.startsWith("build.")) {
+//            def k = key.substring(6)
+//            ext.setProperty(k, value)
+//            println("build:put::$k = [$value]")
+//        }
+//    }
+    println("===============> BUILD END <===============")
+}
+
+// 获取编译当前安装包的时间
+def buildAppTime = {
+    return new Date().format("yyyy_MM_dd_HH_mm")
+}
+
+// initBuildConfigFieldAndResValueScript 初始化生成BuildConfig和resValue变量脚本
+ext.initBuildConfigFieldAndResValueScript = { param, sourceSets ->
+    println("===============> GENERATE START <===============")
+    param.buildConfigField("String", "BUILD_TIME", "\"" + buildAppTime() + "\"")
+    bootBCMap.forEach() { key, value ->
+        println("info: initApplicationScript BuildConfig::$key = [$value]")
+        param.buildConfigField("String", key, "\"${value}\"")
+    }
+    bootRVMap.forEach() { key, value ->
+        println("info: initApplicationScript resValue::$key = [$value]")
+        param.resValue("string", key, "${value}")
+    }
+    println("===============> GENERATE END <===============")
+}
