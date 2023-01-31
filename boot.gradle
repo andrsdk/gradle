@@ -130,4 +130,9 @@ ext.initBuildConfigFieldAndResValueScript = { param, sourceSets ->
         param.resValue("string", key, "${value}")
     }
     println("===============> GENERATE END <===============")
+
+    println("sourceSets java/res/assets: src/${BUILD_TARGET.toLowerCase()}/[java/res/assets]")
+    sourceSets.main.java.srcDirs += "src/${BUILD_TARGET.toLowerCase()}/java"
+    sourceSets.main.res.srcDirs += "src/${BUILD_TARGET.toLowerCase()}/res"
+    sourceSets.main.assets.srcDirs += "src/${BUILD_TARGET.toLowerCase()}/assets"
 }
